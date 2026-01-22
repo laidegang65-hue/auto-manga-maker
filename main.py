@@ -6,17 +6,19 @@ import requests
 from openai import OpenAI
 
 # ================= 配置区 =================
-print("🚀 初始化：正在连接 GitHub 本地 Ollama...")
+print("🚀 初始化：正在连接 Pollinations 免费公共接口...")
 
+# 使用 Pollinations 的文本接口
+# 特点：免费、无需注册、无需 Key
 client = OpenAI(
-    api_key="ollama", 
-    base_url="http://localhost:11434/v1" 
+    api_key="dummy",  # 随便填，它不验证
+    base_url="https://text.pollinations.ai/" 
 )
 
 # ================= 核心函数 =================
 
 def get_storyboard(novel_text):
-    print(f"📖 正在通过本地 CPU 分析小说...")
+    print(f"📖 正在通过云端免费接口分析小说...")
     
     system_prompt = """
     你是一个分镜导演。请将小说片段拆解为 3 个关键镜头的分镜脚本。
@@ -24,28 +26,46 @@ def get_storyboard(novel_text):
     1. 只返回纯 JSON 格式，严禁包含 markdown 标记。
     2. 字段：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
     3. sd_prompt 必须包含：画面主体, 动作, 环境, 光影, anime style, 8k。
+    
+    【JSON示例】：
+    [
+      {"id": 1, "narrator": "...", "sd_prompt": "1boy, running, forest, anime style"}
+    ]
     """
 
     try:
         start_time = time.time()
+        
+        # Pollinations 会自动路由到 GPT-4o 或 Claude 等模型，完全免费
         response = client.chat.completions.create(
-            model="qwen2:1.5b", 
+            model="openai", # 这里填 openai 即可
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"处理这段文字:\n{novel_text}"},
             ],
             temperature=0.7,
         )
+        
         print(f"✅ AI 思考耗时: {int(time.time() - start_time)} 秒")
         
         content = response.choices[0].message.content
+        # 清洗数据
         content = content.replace("```json", "").replace("```", "").strip()
-        if not content.endswith("]"): content += "]"
+        
+        # 简单的容错处理
+        if not content.startswith("["):
+             # 有时候免费接口会废话，尝试提取 JSON
+             start = content.find("[")
+             end = content.rfind("]") + 1
+             if start != -1 and end != -1:
+                 content = content[start:end]
         
         return json.loads(content)
     
     except Exception as e:
         print(f"❌ 分镜生成失败: {e}")
+        if 'content' in locals():
+            print(f"原始返回: {content}")
         return []
 
 def download_image(prompt, filename):
@@ -53,12 +73,11 @@ def download_image(prompt, filename):
     final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
     encoded_prompt = requests.utils.quote(final_prompt)
     
-    # === 🚨 关键修复点：这里的 URL 绝对不能有方括号 [] ===
+    # === 纯净的 URL，无方括号错误 ===
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
     print(f"🎨 正在绘图: {filename} ...")
     try:
-        # 增加 headers 伪装成浏览器，防止被拦截
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=60)
         
@@ -68,7 +87,6 @@ def download_image(prompt, filename):
             print(f"✅ 保存成功")
         else:
             print(f"⚠️ 下载失败: {resp.status_code}")
-            
     except Exception as e:
         print(f"⚠️ 请求错误: {e}")
 
@@ -77,6 +95,7 @@ if __name__ == "__main__":
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
+    # === 小说片段 ===
     novel = """
     巨大的机甲残骸横亘在荒原之上，夕阳将其染成血红色。
     少年站在残骸顶端，风吹动他白色的衬衫。
@@ -101,7 +120,6 @@ if __name__ == "__main__":
         prompt = scene.get("sd_prompt", "")
         if prompt:
             download_image(prompt, os.path.join(output_dir, f"scene_{idx:03d}.jpg"))
-            # 休息2秒，防止请求太快被封
-            time.sleep(2)
+            time.sleep(1)
             
     print("🎉 任务全部完成！")
