@@ -1,4 +1,4 @@
-name: Free Manga Generator
+name: Video Manga Generator
 
 on:
   workflow_dispatch:
@@ -16,14 +16,19 @@ jobs:
       with:
         python-version: '3.10'
         
-    - name: Install Dependencies
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+
+    - name: Install Python Libs
       run: pip install -r requirements.txt
 
     - name: Run Script
       run: python main.py
       
-    - name: Upload Result
+    - name: Upload Video
       uses: actions/upload-artifact@v4
       with:
-        name: manga-output
-        path: output/
+        name: final-video
+        path: output/final_video.mp4
