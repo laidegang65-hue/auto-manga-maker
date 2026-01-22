@@ -19,11 +19,11 @@ jobs:
     - name: 安装 Python 依赖
       run: pip install -r requirements.txt
 
-    # === 新增：安装并启动 Ollama ===
+    # === 安装并启动 Ollama ===
     - name: 安装 Ollama & 下载模型
       run: |
         echo "正在安装 Ollama..."
-        curl -fsSL https://ollama.com/install.sh | sh
+        curl -fsSL [https://ollama.com/install.sh](https://ollama.com/install.sh) | sh
         
         echo "正在后台启动 Ollama 服务..."
         ollama serve &
@@ -31,15 +31,15 @@ jobs:
         echo "等待服务就绪..."
         sleep 10
         
-        echo "正在拉取 Qwen2-1.5B 模型 (小巧且支持中文)..."
+        echo "正在拉取 Qwen2-1.5B 模型..."
         ollama pull qwen2:1.5b
         
     - name: 开始生成
-      # 这里不需要任何 API KEY 了！
       run: python main.py
       
+    # === 修复点：这里改成英文名 manga-output ===
     - name: 上传结果
       uses: actions/upload-artifact@v4
       with:
-        name: 漫剧素材包
+        name: manga-output
         path: output/
