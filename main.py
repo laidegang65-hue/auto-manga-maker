@@ -6,69 +6,64 @@ import requests
 from openai import OpenAI
 
 # ================= 配置区 =================
-# 读取你刚才设置的 Secret
-api_key = os.environ.get("GROQ_API_KEY") 
-if not api_key:
-    # 尝试读取旧名字，防止你没改名
-    api_key = os.environ.get("GEMINI_API_KEY")
+# 不需要 API Key 了，直接连本地
+print("🚀 初始化：正在连接 GitHub 本地 Ollama...")
 
-if not api_key:
-    print("❌ 错误：未检测到 Key！请在 GitHub Secrets 中添加 GROQ_API_KEY")
-    sys.exit(1)
-
-# 配置 Groq (完全兼容 OpenAI 写法)
 client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.groq.com/openai/v1"
+    api_key="ollama", # 随便填，本地不验证
+    base_url="http://localhost:11434/v1" # 指向本地端口
 )
 
 # ================= 核心函数 =================
 
 def get_storyboard(novel_text):
-    print(f"📖 正在通过 Groq 分析小说，字数：{len(novel_text)}...")
+    print(f"📖 正在通过本地 CPU 分析小说 (速度较慢请耐心等待)...")
     
     system_prompt = """
-    You are a professional storyboard director. 
-    Task: Convert the user's Chinese novel text into a standard storyboard JSON list.
+    你是一个分镜导演。请将小说片段拆解为 3 个关键镜头的分镜脚本。
     
-    Requirements:
-    1. Output MUST be valid JSON only. NO markdown blocks (no ```json).
-    2. Fields per shot: 
-       - "id": integer index
-       - "narrator": (Keep in Chinese) The narration text.
-       - "sd_prompt": (In English) Stable Diffusion prompt describing the scene visually.
-    3. sd_prompt format: "subject description, action, environment, lighting, anime style, 8k, masterpiece"
+    【强制要求】：
+    1. 只返回纯 JSON 格式，严禁包含 markdown 标记(如 ```json)。
+    2. JSON 字段：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
+    3. sd_prompt 必须包含：画面主体, 动作, 环境, 光影, anime style, 8k。
     
-    Example Output:
+    【示例】：
     [
-      {"id": 1, "narrator": "午夜时分，钟声响起。", "sd_prompt": "1girl, cinderella, running on stairs, glass shoe left behind, castle background, night, moonlight, anime style, 8k"}
+      {"id": 1, "narrator": "...", "sd_prompt": "1boy, running, forest, anime style"}
     ]
     """
 
     try:
+        # 开始计时
+        start_time = time.time()
+        
         response = client.chat.completions.create(
-            # 使用 Llama3-70b，目前地表最强开源模型之一，且在Groq上免费
-            model="llama3-70b-8192", 
+            # 必须和 yaml 里拉取的模型名字一致
+            model="qwen2:1.5b", 
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Analyze this text:\n{novel_text}"},
+                {"role": "user", "content": f"处理这段文字:\n{novel_text}"},
             ],
-            temperature=0.5,
-            max_tokens=2048
+            temperature=0.7,
         )
         
+        print(f"✅ AI 思考耗时: {int(time.time() - start_time)} 秒")
+        
         content = response.choices[0].message.content
-        # 清洗数据，防止模型返回 ```json
+        # 暴力清洗数据
         content = content.replace("```json", "").replace("```", "").strip()
         
-        print("✅ 分镜生成成功！")
+        # 尝试修复常见的 JSON 结尾错误
+        if not content.endswith("]"):
+             content += "]"
+        
         return json.loads(content)
     
     except Exception as e:
         print(f"❌ 分镜生成失败: {e}")
-        # 打印原始返回以便调试
+        # 打印原始内容以便调试
         if 'content' in locals():
-            print(f"原始返回内容: {content}")
+            print(f"AI 返回的原始数据: {content}")
         return []
 
 def download_image(prompt, filename):
@@ -76,8 +71,8 @@ def download_image(prompt, filename):
     final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
     encoded_prompt = requests.utils.quote(final_prompt)
     
-    # 使用 Pollinations 免费绘图
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
+    # 使用 Pollinations 免费绘图 (这个还是得联网，但不用 key)
+    url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
     print(f"🎨 正在绘图: {filename} ...")
     try:
@@ -85,29 +80,29 @@ def download_image(prompt, filename):
         if resp.status_code == 200:
             with open(filename, "wb") as f:
                 f.write(resp.content)
-            print(f"✅ 保存成功: {filename}")
+            print(f"✅ 保存成功")
         else:
-            print(f"⚠️ 图片下载失败，状态码: {resp.status_code}")
+            print(f"⚠️ 下载失败: {resp.status_code}")
     except Exception as e:
-        print(f"⚠️ 图片请求错误: {e}")
+        print(f"⚠️ 请求错误: {e}")
 
 # ================= 主程序 =================
 if __name__ == "__main__":
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
-    # === 测试小说片段 ===
+    # === 小说片段 ===
     novel = """
-    林萧站在废弃的机甲残骸上，夕阳将他的影子拉得很长。
-    风吹乱了他银色的头发，他按住腰间的断刀，眼神冷冽。
-    远处的地平线上，黑压压的虫潮正在逼近，空气中弥漫着硝烟的味道。
+    巨大的机甲残骸横亘在荒原之上，夕阳将其染成血红色。
+    少年站在残骸顶端，风吹动他白色的衬衫。
+    他摘下护目镜，露出一双金色的机械义眼，冷冷地注视着地平线上涌来的虫潮。
     """
 
     # 1. 获取分镜
     scenes = get_storyboard(novel)
     
     if not scenes:
-        print("❌ 致命错误：分镜列表为空。")
+        print("❌ 致命错误：未能生成有效的分镜。")
         sys.exit(1)
 
     # 保存脚本
@@ -115,13 +110,12 @@ if __name__ == "__main__":
         json.dump(scenes, f, ensure_ascii=False, indent=2)
 
     # 2. 生成图片
-    print(f"🚀 开始生成 {len(scenes)} 张图片...")
+    print(f"🚀 开始生成图片...")
     for scene in scenes:
         idx = scene.get("id", 0)
         prompt = scene.get("sd_prompt", "")
-        
         if prompt:
             download_image(prompt, os.path.join(output_dir, f"scene_{idx:03d}.jpg"))
-            time.sleep(1) 
-        
-    print("🎉 任务完成！请去 Artifacts 下载结果！")
+            time.sleep(1)
+            
+    print("🎉 任务全部完成！无需任何 API Key！")
