@@ -6,7 +6,6 @@ import requests
 from openai import OpenAI
 
 # ================= 配置区 =================
-# 不需要 API Key，直接连 GitHub 本地
 print("🚀 初始化：正在连接 GitHub 本地 Ollama...")
 
 client = OpenAI(
@@ -17,28 +16,19 @@ client = OpenAI(
 # ================= 核心函数 =================
 
 def get_storyboard(novel_text):
-    print(f"📖 正在通过本地 CPU 分析小说 (速度较慢请耐心等待)...")
+    print(f"📖 正在通过本地 CPU 分析小说...")
     
     system_prompt = """
     你是一个分镜导演。请将小说片段拆解为 3 个关键镜头的分镜脚本。
-    
     【强制要求】：
-    1. 只返回纯 JSON 格式，严禁包含 markdown 标记(如 ```json)。
-    2. JSON 字段：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
+    1. 只返回纯 JSON 格式，严禁包含 markdown 标记。
+    2. 字段：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
     3. sd_prompt 必须包含：画面主体, 动作, 环境, 光影, anime style, 8k。
-    
-    【示例】：
-    [
-      {"id": 1, "narrator": "...", "sd_prompt": "1boy, running, forest, anime style"}
-    ]
     """
 
     try:
-        # 开始计时
         start_time = time.time()
-        
         response = client.chat.completions.create(
-            # 必须和 yaml 里拉取的模型名字一致
             model="qwen2:1.5b", 
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -46,24 +36,16 @@ def get_storyboard(novel_text):
             ],
             temperature=0.7,
         )
-        
         print(f"✅ AI 思考耗时: {int(time.time() - start_time)} 秒")
         
         content = response.choices[0].message.content
-        # 暴力清洗数据
         content = content.replace("```json", "").replace("```", "").strip()
-        
-        # 尝试修复常见的 JSON 结尾错误
-        if not content.endswith("]"):
-             content += "]"
+        if not content.endswith("]"): content += "]"
         
         return json.loads(content)
     
     except Exception as e:
         print(f"❌ 分镜生成失败: {e}")
-        # 打印原始内容以便调试
-        if 'content' in locals():
-            print(f"AI 返回的原始数据: {content}")
         return []
 
 def download_image(prompt, filename):
@@ -71,18 +53,22 @@ def download_image(prompt, filename):
     final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
     encoded_prompt = requests.utils.quote(final_prompt)
     
-    # === 修复点：这里是干净的 URL，没有方括号 ===
-    url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
+    # === 🚨 关键修复点：这里的 URL 绝对不能有方括号 [] ===
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
     print(f"🎨 正在绘图: {filename} ...")
     try:
-        resp = requests.get(url, timeout=60)
+        # 增加 headers 伪装成浏览器，防止被拦截
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=60)
+        
         if resp.status_code == 200:
             with open(filename, "wb") as f:
                 f.write(resp.content)
             print(f"✅ 保存成功")
         else:
             print(f"⚠️ 下载失败: {resp.status_code}")
+            
     except Exception as e:
         print(f"⚠️ 请求错误: {e}")
 
@@ -91,7 +77,6 @@ if __name__ == "__main__":
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
-    # === 小说片段 ===
     novel = """
     巨大的机甲残骸横亘在荒原之上，夕阳将其染成血红色。
     少年站在残骸顶端，风吹动他白色的衬衫。
@@ -110,12 +95,13 @@ if __name__ == "__main__":
         json.dump(scenes, f, ensure_ascii=False, indent=2)
 
     # 2. 生成图片
-    print(f"🚀 开始生成图片...")
+    print(f"🚀 开始生成图片 (共 {len(scenes)} 张)...")
     for scene in scenes:
         idx = scene.get("id", 0)
         prompt = scene.get("sd_prompt", "")
         if prompt:
             download_image(prompt, os.path.join(output_dir, f"scene_{idx:03d}.jpg"))
-            time.sleep(1)
+            # 休息2秒，防止请求太快被封
+            time.sleep(2)
             
     print("🎉 任务全部完成！")
