@@ -9,18 +9,16 @@ import edge_tts
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 
 # ================= 配置区 =================
-print("🚀 初始化：自定义剧本模式...")
+print("🚀 初始化：防花屏 + 强力配音版...")
 
 # ================= 1. 分镜生成模块 =================
 def get_storyboard(novel_text):
-    print(f"📖 [1/4] 正在分析你的剧本...")
-    # 限制字数，防止免费接口处理不过来
-    if len(novel_text) > 1000:
-        novel_text = novel_text[:1000]
-        
+    print(f"📖 [1/4] 正在分析剧本...")
+    if len(novel_text) > 800: novel_text = novel_text[:800]
+    
     prompt = f"""
     Role: Storyboard Director.
-    Task: Convert novel to JSON list of 3 to 5 scenes.
+    Task: Convert novel to JSON list of 3 scenes.
     Format: JSON ONLY. No markdown.
     Fields: "id", "narrator" (Chinese), "sd_prompt" (English, anime style).
     Novel: {novel_text}
@@ -31,7 +29,6 @@ def get_storyboard(novel_text):
     try:
         response = requests.get(url, timeout=60)
         content = response.text
-        # 清洗 JSON
         start = content.find("[")
         end = content.rfind("]") + 1
         if start != -1 and end != -1:
@@ -41,57 +38,59 @@ def get_storyboard(novel_text):
         print(f"❌ 分镜错误: {e}")
         return []
 
-# ================= 2. 画图模块 =================
+# ================= 2. 画图模块 (带重试) =================
 def download_image(prompt, filename):
     final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
     encoded_prompt = urllib.parse.quote(final_prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=60)
-        if resp.status_code == 200:
-            with open(filename, "wb") as f:
-                f.write(resp.content)
-            return True
-    except:
-        pass
+    # 尝试下载 3 次，防止网络波动导致花屏
+    for i in range(3):
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200 and len(resp.content) > 1024: # 确保文件大于1KB
+                with open(filename, "wb") as f:
+                    f.write(resp.content)
+                return True
+            else:
+                print(f"      ⚠️ 图片下载失败 (尝试 {i+1}/3)...")
+                time.sleep(2)
+        except:
+            pass
     return False
 
 # ================= 3. 配音模块 =================
 async def generate_audio(text, filename):
     try:
-        # 使用微软超逼真语音 (晓晓)
+        # 使用微软晓晓 (zh-CN-XiaoxiaoNeural)
         communicate = edge_tts.Communicate(text, "zh-CN-XiaoxiaoNeural")
         await communicate.save(filename)
     except Exception as e:
-        print(f"      ⚠️ 配音失败: {e}")
+        print(f"      ⚠️ 配音生成出错: {e}")
 
 # ================= 主程序 =================
 if __name__ == "__main__":
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
-    # === 关键修改：从 GitHub 输入框读取文字 ===
-    # 如果没有输入（比如本地测试），就用默认的
-    default_text = "一个孤独的剑客在沙漠中行走，夕阳西下。"
+    # 获取输入
+    default_text = "林萧站在废墟顶端，红色的斗篷在风中猎猎作响。他拔出背后的长刀，刀锋在月光下闪着寒光。前方，一只巨大的机械巨兽正缓缓从阴影中浮现。"
     novel = os.environ.get("USER_NOVEL", default_text)
     
-    print(f"📝 收到剧本任务：\n{novel[:50]}...")
-
-    # --- 步骤 1: 获取分镜 ---
+    # 1. 获取分镜
     scenes = get_storyboard(novel)
     if not scenes:
-        print("❌ 无法生成分镜，请检查剧本是否太长或含有特殊字符")
+        print("❌ 分镜生成失败")
         sys.exit(1)
 
-    # --- 步骤 2: 生产素材 ---
+    # 2. 生产素材
     video_clips = []
-    print(f"🎬 [2/4] 开始生产素材 (共 {len(scenes)} 个镜头)...")
+    print(f"🎬 [2/4] 开始生产素材 (共 {len(scenes)} 镜)...")
     
     for scene in scenes:
         idx = scene.get("id", 0)
-        print(f"   👉 处理第 {idx} 镜...")
+        print(f"   👉 第 {idx} 镜处理中...")
         
         img_path = os.path.join(output_dir, f"scene_{idx}.jpg")
         audio_path = os.path.join(output_dir, f"scene_{idx}.mp3")
@@ -101,33 +100,48 @@ if __name__ == "__main__":
             # B. 配音
             asyncio.run(generate_audio(scene.get("narrator"), audio_path))
             
-            # C. 组装
+            # C. 严格检查素材完整性
             if os.path.exists(img_path) and os.path.exists(audio_path):
-                try:
-                    audio_clip = AudioFileClip(audio_path)
-                    # 至少给图片 3 秒展示时间，如果语音很短
-                    duration = max(audio_clip.duration, 3) 
-                    
-                    video_clip = ImageClip(img_path).set_duration(duration)
-                    video_clip = video_clip.set_audio(audio_clip)
-                    video_clip.fps = 24
-                    video_clips.append(video_clip)
-                except Exception as e:
-                    print(f"      剪辑出错: {e}")
+                # 检查文件大小，防止空文件导致无声/花屏
+                if os.path.getsize(audio_path) > 100: 
+                    try:
+                        audio_clip = AudioFileClip(audio_path)
+                        duration = audio_clip.duration + 0.5 # 多给0.5秒余量
+                        
+                        img_clip = ImageClip(img_path).set_duration(duration)
+                        img_clip = img_clip.set_audio(audio_clip)
+                        img_clip.fps = 24
+                        video_clips.append(img_clip)
+                        print(f"      ✅ 素材合成成功 (时长: {duration:.1f}s)")
+                    except Exception as e:
+                        print(f"      ❌ 剪辑片段出错: {e}")
+                else:
+                    print("      ❌ 音频文件过小，可能是生成失败")
+            else:
+                print("      ❌ 素材文件缺失")
                 
-            time.sleep(10) # 休息防封
+            time.sleep(5) # 休息防封
         else:
-            print("      画图失败，跳过")
+            print("      ❌ 画图彻底失败，跳过")
 
-    # --- 步骤 3: 合成视频 ---
+    # 3. 合成视频
     if video_clips:
-        print(f"🎞️ [3/4] 正在合成最终视频...")
+        print(f"🎞️ [3/4] 正在渲染最终视频...")
         try:
             final_video = concatenate_videoclips(video_clips)
             final_path = os.path.join(output_dir, "final_video.mp4")
-            final_video.write_videofile(final_path, codec="libx264", audio_codec="aac", fps=24, preset="ultrafast")
-            print(f"✅ [4/4] 视频制作完成！请下载 artifact")
+            
+            # === 🚨 关键修复：强制使用 yuv420p 修复花屏，使用 aac 修复无声 ===
+            final_video.write_videofile(
+                final_path, 
+                codec="libx264", 
+                audio_codec="aac", 
+                fps=24, 
+                preset="medium", # 牺牲一点速度换取稳定性
+                ffmpeg_params=['-pix_fmt', 'yuv420p'] # <--- 这句是修复花屏的神器！
+            )
+            print(f"✅ [4/4] 视频大功告成！")
         except Exception as e:
-            print(f"❌ 合成失败: {e}")
+            print(f"❌ 渲染失败: {e}")
     else:
-        print("❌ 没有生成有效的视频片段")
+        print("❌ 没有有效片段，无法合成")
