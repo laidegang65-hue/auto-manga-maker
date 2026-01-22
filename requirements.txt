@@ -1,4 +1,4 @@
 requests
 edge-tts
-moviepy
+moviepy==1.0.3
 imageio-ffmpeg
