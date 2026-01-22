@@ -3,77 +3,63 @@ import json
 import time
 import sys
 import requests
-from openai import OpenAI
+import urllib.parse
 
-# ================= 配置区 =================
-print("🚀 初始化：正在连接 Pollinations 免费公共接口...")
-
-# 使用 Pollinations 的文本接口
-# 特点：免费、无需注册、无需 Key
-client = OpenAI(
-    api_key="dummy",  # 随便填，它不验证
-    base_url="https://text.pollinations.ai/" 
-)
-
-# ================= 核心函数 =================
+# ================= 核心配置 =================
+print("🚀 初始化：使用 Pollinations 免费直连模式 (无Key版)...")
 
 def get_storyboard(novel_text):
-    print(f"📖 正在通过云端免费接口分析小说...")
+    print(f"📖 正在通过免费接口分析小说...")
     
-    system_prompt = """
-    你是一个分镜导演。请将小说片段拆解为 3 个关键镜头的分镜脚本。
-    【强制要求】：
-    1. 只返回纯 JSON 格式，严禁包含 markdown 标记。
-    2. 字段：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
-    3. sd_prompt 必须包含：画面主体, 动作, 环境, 光影, anime style, 8k。
-    
-    【JSON示例】：
-    [
-      {"id": 1, "narrator": "...", "sd_prompt": "1boy, running, forest, anime style"}
-    ]
+    # 精简提示词，防止URL过长报错
+    prompt = f"""
+    Role: Storyboard Director.
+    Task: Convert the novel into a JSON list of 3 scenes.
+    Format: JSON ONLY. No markdown.
+    Fields: "id", "narrator" (Chinese), "sd_prompt" (English, anime style, visual details).
+    Novel: {novel_text}
     """
+    
+    # URL 编码
+    encoded_prompt = urllib.parse.quote(prompt)
+    # 使用 GET 请求直连，强制指定 model=openai
+    url = f"https://text.pollinations.ai/{encoded_prompt}?model=openai"
 
     try:
         start_time = time.time()
+        # 发送请求
+        response = requests.get(url, timeout=60)
         
-        # Pollinations 会自动路由到 GPT-4o 或 Claude 等模型，完全免费
-        response = client.chat.completions.create(
-            model="openai", # 这里填 openai 即可
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"处理这段文字:\n{novel_text}"},
-            ],
-            temperature=0.7,
-        )
+        # 检查是否是 HTML 报错 (你刚才遇到的问题)
+        if "<!DOCTYPE html>" in response.text:
+            print("⚠️ 接口返回了网页而非数据，尝试备用清洗...")
         
-        print(f"✅ AI 思考耗时: {int(time.time() - start_time)} 秒")
+        content = response.text
+        print(f"✅ AI 响应耗时: {int(time.time() - start_time)} 秒")
         
-        content = response.choices[0].message.content
-        # 清洗数据
-        content = content.replace("```json", "").replace("```", "").strip()
+        # === 暴力清洗数据 ===
+        # 免费接口有时候会返回 "Here is the JSON: [ ... ]"，我们需要提取 [ ... ]
+        start = content.find("[")
+        end = content.rfind("]") + 1
         
-        # 简单的容错处理
-        if not content.startswith("["):
-             # 有时候免费接口会废话，尝试提取 JSON
-             start = content.find("[")
-             end = content.rfind("]") + 1
-             if start != -1 and end != -1:
-                 content = content[start:end]
-        
-        return json.loads(content)
+        if start != -1 and end != -1:
+            clean_content = content[start:end]
+            return json.loads(clean_content)
+        else:
+            print("❌ 未在返回结果中找到 JSON 列表符号 []")
+            print(f"原始内容片段: {content[:100]}...")
+            return []
     
     except Exception as e:
         print(f"❌ 分镜生成失败: {e}")
-        if 'content' in locals():
-            print(f"原始返回: {content}")
         return []
 
 def download_image(prompt, filename):
     # 强制加上动漫风格
     final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
-    encoded_prompt = requests.utils.quote(final_prompt)
+    encoded_prompt = urllib.parse.quote(final_prompt)
     
-    # === 纯净的 URL，无方括号错误 ===
+    # Pollinations 画图接口 (这个一直很稳)
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
     print(f"🎨 正在绘图: {filename} ...")
@@ -106,7 +92,7 @@ if __name__ == "__main__":
     scenes = get_storyboard(novel)
     
     if not scenes:
-        print("❌ 致命错误：未能生成有效的分镜。")
+        print("❌ 致命错误：未能生成有效的分镜。可能是免费接口繁忙，请过几分钟再试。")
         sys.exit(1)
 
     # 保存脚本
@@ -120,6 +106,7 @@ if __name__ == "__main__":
         prompt = scene.get("sd_prompt", "")
         if prompt:
             download_image(prompt, os.path.join(output_dir, f"scene_{idx:03d}.jpg"))
-            time.sleep(1)
+            # 免费接口要温柔一点，休息2秒
+            time.sleep(2)
             
     print("🎉 任务全部完成！")
