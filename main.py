@@ -6,12 +6,12 @@ import requests
 from openai import OpenAI
 
 # ================= 配置区 =================
-# 不需要 API Key 了，直接连本地
+# 不需要 API Key，直接连 GitHub 本地
 print("🚀 初始化：正在连接 GitHub 本地 Ollama...")
 
 client = OpenAI(
-    api_key="ollama", # 随便填，本地不验证
-    base_url="http://localhost:11434/v1" # 指向本地端口
+    api_key="ollama", 
+    base_url="http://localhost:11434/v1" 
 )
 
 # ================= 核心函数 =================
@@ -71,7 +71,7 @@ def download_image(prompt, filename):
     final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
     encoded_prompt = requests.utils.quote(final_prompt)
     
-    # 使用 Pollinations 免费绘图 (这个还是得联网，但不用 key)
+    # === 修复点：这里是干净的 URL，没有方括号 ===
     url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
     print(f"🎨 正在绘图: {filename} ...")
@@ -118,4 +118,4 @@ if __name__ == "__main__":
             download_image(prompt, os.path.join(output_dir, f"scene_{idx:03d}.jpg"))
             time.sleep(1)
             
-    print("🎉 任务全部完成！无需任何 API Key！")
+    print("🎉 任务全部完成！")
