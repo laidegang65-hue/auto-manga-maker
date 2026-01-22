@@ -3,66 +3,80 @@ import json
 import time
 import sys
 import requests
-from openai import OpenAI
+import google.generativeai as genai # 换成官方库
 
 # ================= 配置区 =================
 # 1. 验证 API Key
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
     print("❌ 错误：未检测到 GEMINI_API_KEY，请在 GitHub Secrets 中配置！")
-    sys.exit(1) # 强制退出，让 Action 显示红色失败
+    sys.exit(1)
 
-# 2. 配置客户端 (使用 Google 的 OpenAI 兼容接口)
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-)
+# 2. 配置 Google 官方客户端
+try:
+    genai.configure(api_key=api_key)
+except Exception as e:
+    print(f"❌ API配置失败: {e}")
+    sys.exit(1)
 
 # ================= 核心函数 =================
 
 def get_storyboard(novel_text):
     print(f"📖 正在分析小说，字数：{len(novel_text)}...")
     
-    system_prompt = """
-    你是一个专业的漫剧分镜导演。请将输入的小说片段拆解为3-5个关键镜头的分镜脚本。
-    必须严格返回纯 JSON 格式，列表结构，不要包含 markdown 标记。
-    JSON 格式示例：
+    # 这里的 Prompt 稍微调整一下，让它更听话
+    prompt = f"""
+    你是一个分镜导演。请将以下小说片段拆解为 3 个关键镜头的分镜脚本。
+    
+    【小说片段】：
+    {novel_text}
+    
+    【要求】：
+    1. 必须返回纯 JSON 格式列表。
+    2. 不要使用 markdown 格式（不要用 ```json 包裹）。
+    3. 每个镜头包含：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
+    4. sd_prompt 必须包含：画面主体、环境描述、光影风格、"anime style"。
+    
+    【JSON示例】：
     [
-      {
-        "id": 1,
-        "narrator": "旁白内容",
-        "sd_prompt": "highly detailed, anime style, 1boy, black hair, holding a sword, forest background, cinematic lighting, 8k"
-      }
+        {{"id": 1, "narrator": "...", "sd_prompt": "..."}},
+        {{"id": 2, "narrator": "...", "sd_prompt": "..."}}
     ]
-    注意：sd_prompt 必须是英文，且包含详细的画面描述。
     """
 
     try:
-        response = client.chat.completions.create(
-            # 修改点：使用 latest 版本，避免 404 错误
-            model="gemini-1.5-flash-latest", 
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": novel_text},
-            ]
-        )
-        content = response.choices[0].message.content
-        # 清洗数据
+        # 使用官方定义的模型名称，这个最稳
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # 发送请求
+        response = model.generate_content(prompt)
+        
+        # 获取文本
+        content = response.text
+        
+        # 清洗数据 (去掉可能存在的 markdown 符号)
         content = content.replace("```json", "").replace("```", "").strip()
-        return json.loads(content)
-    
+        
+        # 尝试解析 JSON
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            # 如果 AI 返回的不是标准 JSON，尝试强行修复或打印错误
+            print("⚠️ AI 返回的格式不标准，正在打印原始内容：")
+            print(content)
+            return []
+            
     except Exception as e:
         print(f"❌ 分镜生成失败: {e}")
-        # 这里不退出，返回空列表，让主程序决定是否退出
         return []
 
 def download_image(prompt, filename):
     # 强制加上动漫风格
-    final_prompt = f"{prompt}, anime style, masterpiece, best quality"
+    final_prompt = f"{prompt}, anime style, masterpiece, best quality, 8k"
     encoded_prompt = requests.utils.quote(final_prompt)
     
     # 使用 Pollinations 免费绘图
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
+    url = f"[https://image.pollinations.ai/prompt/](https://image.pollinations.ai/prompt/){encoded_prompt}?width=768&height=1344&model=flux&seed={int(time.time())}"
     
     print(f"🎨 正在绘图: {filename} ...")
     try:
@@ -82,11 +96,11 @@ if __name__ == "__main__":
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
-    # === 修改这里：输入你的小说片段 ===
+    # === 小说片段 ===
     novel = """
-    林萧站在废弃的都市废墟之上，风吹动他破旧的红色斗篷。
-    他手里紧紧握着那把断裂的合金长刀，眼神冷冽地注视着前方。
-    远处，巨大的机甲残骸在夕阳下投射出长长的阴影。
+    巨大的机甲残骸横亘在荒原之上，夕阳将其染成血红色。
+    少年站在残骸顶端，风吹动他白色的衬衫。
+    他摘下护目镜，露出一双金色的机械义眼，冷冷地注视着地平线上涌来的虫潮。
     """
 
     # 1. 获取分镜
@@ -94,7 +108,7 @@ if __name__ == "__main__":
     
     # 如果分镜为空，强制报错退出
     if not scenes:
-        print("❌ 致命错误：未能生成有效的分镜脚本。程序终止。")
+        print("❌ 致命错误：未能生成有效的分镜脚本。可能是 API 连接问题或 AI 没听懂。")
         sys.exit(1) 
 
     # 保存分镜脚本
@@ -112,6 +126,8 @@ if __name__ == "__main__":
         
         if prompt:
             download_image(prompt, img_filename)
+            # 休息1秒，防止请求太快
+            time.sleep(1)
         else:
             print(f"跳过场景 {idx}: 提示词为空")
             
