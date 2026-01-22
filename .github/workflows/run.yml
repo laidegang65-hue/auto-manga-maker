@@ -24,7 +24,10 @@ jobs:
     - name: Install System Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg
+        # 安装 ffmpeg (视频), imagemagick (字幕处理), fonts-wqy-microhei (开源中文字体)
+        sudo apt-get install -y ffmpeg imagemagick fonts-wqy-microhei
+        # === 关键：修复 ImageMagick 的权限策略，否则无法处理字幕 ===
+        sudo sed -i 's/none/read,write/g' /etc/ImageMagick-6/policy.xml
 
     - name: Install Python Libs
       run: pip install -r requirements.txt
