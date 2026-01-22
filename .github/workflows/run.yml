@@ -1,4 +1,4 @@
-name: Pure Free Manga
+name: Free Manga Generator
 
 on:
   workflow_dispatch:
@@ -20,7 +20,6 @@ jobs:
       run: pip install -r requirements.txt
 
     - name: Run Script
-      # 不需要任何 env 和 secret
       run: python main.py
       
     - name: Upload Result
