@@ -1,4 +1,4 @@
-name: Generate Manga (Ollama)
+name: Pure Free Manga
 
 on:
   workflow_dispatch:
@@ -19,22 +19,8 @@ jobs:
     - name: Install Dependencies
       run: pip install -r requirements.txt
 
-    # === 修复重点：这里全部改成纯英文，去掉了所有括号 ===
-    - name: Install Ollama and Model
-      run: |
-        echo "Installing Ollama..."
-        curl -fsSL https://ollama.com/install.sh | sh
-        
-        echo "Starting Ollama Service..."
-        ollama serve &
-        
-        echo "Waiting for service..."
-        sleep 10
-        
-        echo "Pulling Qwen2 Model..."
-        ollama pull qwen2:1.5b
-        
     - name: Run Script
+      # 不需要任何 env 和 secret
       run: python main.py
       
     - name: Upload Result
