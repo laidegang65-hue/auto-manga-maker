@@ -1,7 +1,12 @@
-name: Video Manga Generator
+name: Custom Manga Video
 
 on:
   workflow_dispatch:
+    inputs:
+      novel_text:
+        description: '在此粘贴你的小说/剧本片段 (建议300字以内)'
+        required: true
+        default: '林萧站在废墟顶端，红色的斗篷在风中猎猎作响。他拔出背后的长刀，刀锋在月光下闪着寒光。前方，一只巨大的机械巨兽正缓缓从阴影中浮现。'
 
 jobs:
   build:
@@ -25,10 +30,13 @@ jobs:
       run: pip install -r requirements.txt
 
     - name: Run Script
+      env:
+        # === 关键：把输入框的文字传给 Python ===
+        USER_NOVEL: ${{ inputs.novel_text }}
       run: python main.py
       
     - name: Upload Video
       uses: actions/upload-artifact@v4
       with:
-        name: final-video
+        name: my-video
         path: output/final_video.mp4
