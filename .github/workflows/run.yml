@@ -1,44 +1,43 @@
-name: 生成AI漫剧 (本地Ollama版)
+name: Generate Manga (Ollama)
 
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-    - name: 拉取代码
+    - name: Checkout Code
       uses: actions/checkout@v3
       
-    - name: 安装 Python
+    - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
-    - name: 安装 Python 依赖
+    - name: Install Dependencies
       run: pip install -r requirements.txt
 
-    # === 安装并启动 Ollama ===
-    - name: 安装 Ollama & 下载模型
+    # === 修复重点：这里全部改成纯英文，去掉了所有括号 ===
+    - name: Install Ollama and Model
       run: |
-        echo "正在安装 Ollama..."
-        curl -fsSL [https://ollama.com/install.sh](https://ollama.com/install.sh) | sh
+        echo "Installing Ollama..."
+        curl -fsSL https://ollama.com/install.sh | sh
         
-        echo "正在后台启动 Ollama 服务..."
+        echo "Starting Ollama Service..."
         ollama serve &
         
-        echo "等待服务就绪..."
+        echo "Waiting for service..."
         sleep 10
         
-        echo "正在拉取 Qwen2-1.5B 模型..."
+        echo "Pulling Qwen2 Model..."
         ollama pull qwen2:1.5b
         
-    - name: 开始生成
+    - name: Run Script
       run: python main.py
       
-    # === 修复点：这里改成英文名 manga-output ===
-    - name: 上传结果
+    - name: Upload Result
       uses: actions/upload-artifact@v4
       with:
         name: manga-output
