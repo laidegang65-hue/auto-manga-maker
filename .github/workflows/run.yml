@@ -1,7 +1,7 @@
-name: 生成AI漫剧
+name: 生成AI漫剧 (本地Ollama版)
 
 on:
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch: # 手动触发
 
 jobs:
   build:
@@ -16,12 +16,26 @@ jobs:
       with:
         python-version: '3.10'
         
-    - name: 安装依赖
+    - name: 安装 Python 依赖
       run: pip install -r requirements.txt
-      
+
+    # === 新增：安装并启动 Ollama ===
+    - name: 安装 Ollama & 下载模型
+      run: |
+        echo "正在安装 Ollama..."
+        curl -fsSL https://ollama.com/install.sh | sh
+        
+        echo "正在后台启动 Ollama 服务..."
+        ollama serve &
+        
+        echo "等待服务就绪..."
+        sleep 10
+        
+        echo "正在拉取 Qwen2-1.5B 模型 (小巧且支持中文)..."
+        ollama pull qwen2:1.5b
+        
     - name: 开始生成
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # 这里不需要任何 API KEY 了！
       run: python main.py
       
     - name: 上传结果
