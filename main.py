@@ -3,74 +3,72 @@ import json
 import time
 import sys
 import requests
+from openai import OpenAI
 
 # ================= 配置区 =================
-api_key = os.environ.get("GEMINI_API_KEY")
+# 读取你刚才设置的 Secret
+api_key = os.environ.get("GROQ_API_KEY") 
 if not api_key:
-    print("❌ 错误：未检测到 GEMINI_API_KEY，请在 GitHub Secrets 中配置！")
+    # 尝试读取旧名字，防止你没改名
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+if not api_key:
+    print("❌ 错误：未检测到 Key！请在 GitHub Secrets 中添加 GROQ_API_KEY")
     sys.exit(1)
 
-# ================= 核心函数 (纯 HTTP 请求版) =================
+# 配置 Groq (完全兼容 OpenAI 写法)
+client = OpenAI(
+    api_key=api_key,
+    base_url="https://api.groq.com/openai/v1"
+)
+
+# ================= 核心函数 =================
 
 def get_storyboard(novel_text):
-    print(f"📖 正在分析小说，字数：{len(novel_text)}...")
+    print(f"📖 正在通过 Groq 分析小说，字数：{len(novel_text)}...")
     
-    # Google Gemini 的官方 API 地址
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    system_prompt = """
+    You are a professional storyboard director. 
+    Task: Convert the user's Chinese novel text into a standard storyboard JSON list.
     
-    # 构造请求数据
-    payload = {
-        "contents": [{
-            "parts": [{
-                "text": f"""
-                你是一个分镜导演。请将以下小说片段拆解为 3 个关键镜头的分镜脚本。
-                必须返回纯 JSON 格式列表，不要包含 markdown 标记。
-                每个镜头包含：id, narrator (中文旁白), sd_prompt (英文绘画提示词)。
-                sd_prompt 必须包含：画面主体、环境描述、光影风格、"anime style"。
-                
-                【小说片段】：
-                {novel_text}
-                
-                【JSON示例】：
-                [
-                    {{"id": 1, "narrator": "...", "sd_prompt": "..."}},
-                    {{"id": 2, "narrator": "...", "sd_prompt": "..."}}
-                ]
-                """
-            }]
-        }]
-    }
+    Requirements:
+    1. Output MUST be valid JSON only. NO markdown blocks (no ```json).
+    2. Fields per shot: 
+       - "id": integer index
+       - "narrator": (Keep in Chinese) The narration text.
+       - "sd_prompt": (In English) Stable Diffusion prompt describing the scene visually.
+    3. sd_prompt format: "subject description, action, environment, lighting, anime style, 8k, masterpiece"
     
-    headers = {'Content-Type': 'application/json'}
+    Example Output:
+    [
+      {"id": 1, "narrator": "午夜时分，钟声响起。", "sd_prompt": "1girl, cinderella, running on stairs, glass shoe left behind, castle background, night, moonlight, anime style, 8k"}
+    ]
+    """
 
     try:
-        # 直接发送 POST 请求，不依赖任何 Google 库
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = client.chat.completions.create(
+            # 使用 Llama3-70b，目前地表最强开源模型之一，且在Groq上免费
+            model="llama3-70b-8192", 
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Analyze this text:\n{novel_text}"},
+            ],
+            temperature=0.5,
+            max_tokens=2048
+        )
         
-        # 检查是否成功
-        if response.status_code != 200:
-            print(f"❌ API 请求失败，状态码: {response.status_code}")
-            print(f"错误详情: {response.text}")
-            return []
-            
-        # 解析返回结果
-        result = response.json()
-        
-        # 提取文本内容 (Gemini 的返回结构比较深)
-        try:
-            content = result['candidates'][0]['content']['parts'][0]['text']
-        except (KeyError, IndexError):
-            print("⚠️ 无法从返回结果中提取文本")
-            print(result)
-            return []
-
-        # 清洗 JSON 字符串
+        content = response.choices[0].message.content
+        # 清洗数据，防止模型返回 ```json
         content = content.replace("```json", "").replace("```", "").strip()
         
+        print("✅ 分镜生成成功！")
         return json.loads(content)
-
+    
     except Exception as e:
-        print(f"❌ 分镜生成出错: {e}")
+        print(f"❌ 分镜生成失败: {e}")
+        # 打印原始返回以便调试
+        if 'content' in locals():
+            print(f"原始返回内容: {content}")
         return []
 
 def download_image(prompt, filename):
@@ -98,29 +96,32 @@ if __name__ == "__main__":
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
+    # === 测试小说片段 ===
     novel = """
-    巨大的机甲残骸横亘在荒原之上，夕阳将其染成血红色。
-    少年站在残骸顶端，风吹动他白色的衬衫。
-    他摘下护目镜，露出一双金色的机械义眼，冷冷地注视着地平线上涌来的虫潮。
+    林萧站在废弃的机甲残骸上，夕阳将他的影子拉得很长。
+    风吹乱了他银色的头发，他按住腰间的断刀，眼神冷冽。
+    远处的地平线上，黑压压的虫潮正在逼近，空气中弥漫着硝烟的味道。
     """
 
     # 1. 获取分镜
     scenes = get_storyboard(novel)
     
     if not scenes:
-        print("❌ 致命错误：未能生成有效的分镜。")
+        print("❌ 致命错误：分镜列表为空。")
         sys.exit(1)
 
-    # 保存分镜
+    # 保存脚本
     with open(os.path.join(output_dir, "script.json"), "w", encoding="utf-8") as f:
         json.dump(scenes, f, ensure_ascii=False, indent=2)
 
     # 2. 生成图片
+    print(f"🚀 开始生成 {len(scenes)} 张图片...")
     for scene in scenes:
         idx = scene.get("id", 0)
         prompt = scene.get("sd_prompt", "")
+        
         if prompt:
             download_image(prompt, os.path.join(output_dir, f"scene_{idx:03d}.jpg"))
-            time.sleep(1)
-
-    print("🎉 任务完成！")
+            time.sleep(1) 
+        
+    print("🎉 任务完成！请去 Artifacts 下载结果！")
